@@ -8,5 +8,10 @@ setuptools.setup(
     url='https://github.com/Psiphon-Inc/transifexlib',
     license='GPLv3',
     py_modules=['transifexlib'],
-    packages=setuptools.find_packages(),
+    packages=[
+        'requests',
+        'beautifulsoup4',
+        'ruamel.yaml',
+        'git+https://github.com/chrisballinger/python-localizable.git@15d3bf2466d0de1a826d3f0ff1f365b0c1910f56#egg=localizable'
+    ],
 )
