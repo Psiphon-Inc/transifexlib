@@ -1,6 +1,6 @@
-import setuptools
+from distutils.core import setup
 
-setuptools.setup(
+setup(
     name='transifexlib',
     version='1.0.0',
     description='Transifex helper library for Psiphon projects',
@@ -8,7 +8,7 @@ setuptools.setup(
     url='https://github.com/Psiphon-Inc/transifexlib',
     license='GPLv3',
     py_modules=['transifexlib'],
-    packages=[
+    install_requires=[
         'requests',
         'beautifulsoup4',
         'ruamel.yaml',
