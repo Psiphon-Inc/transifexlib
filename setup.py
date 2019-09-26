@@ -12,6 +12,6 @@ setup(
         'requests',
         'beautifulsoup4',
         'ruamel.yaml',
-        'git+https://github.com/chrisballinger/python-localizable.git@15d3bf2466d0de1a826d3f0ff1f365b0c1910f56#egg=localizable'
+        'localizable @ git+https://github.com/chrisballinger/python-localizable.git@15d3bf2466d0de1a826d3f0ff1f365b0c1910f56#egg=localizable'
     ],
 )
