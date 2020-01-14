@@ -111,7 +111,7 @@ def get_config():
 
 
 def process_resource(resource, langs, master_fpath, output_path_fn, output_mutator_fn,
-                     bom=False, encoding='utf-8'):
+                     bom=False, encoding='utf-8', project='Psiphon3'):
     """
     Pull translations for `resource` from transifex. Languages in `langs` will be
     pulled.
@@ -126,7 +126,7 @@ def process_resource(resource, langs, master_fpath, output_path_fn, output_mutat
     print(f'\nResource: {resource}')
 
     # Check for high-translation languages that we won't be pulling
-    stats = transifex_request(f'resource/{resource}/stats')
+    stats = transifex_request(project, f'resource/{resource}/stats')
     for lang in stats:
         if int(stats[lang]['completed'].rstrip('%')) >= TRANSLATION_COMPLETION_PRINT_THRESHOLD:
             if lang not in langs and lang != 'en':
@@ -137,7 +137,7 @@ def process_resource(resource, langs, master_fpath, output_path_fn, output_mutat
                     f'{stats[lang]["translated_entities"] + stats[lang]["untranslated_entities"]})'))
 
     for in_lang, out_lang in list(langs.items()):
-        r = transifex_request(f'resource/{resource}/translation/{in_lang}')
+        r = transifex_request(project, f'resource/{resource}/translation/{in_lang}')
 
         output_path = output_path_fn(out_lang)
 
@@ -166,11 +166,11 @@ def process_resource(resource, langs, master_fpath, output_path_fn, output_mutat
             f.write(content)
 
 
-def transifex_request(command, params=None):
+def transifex_request(project, command, params=None):
     """Make a request to the Transifex API.
     """
 
-    url = 'https://www.transifex.com/api/2/project/Psiphon3/' + command + '/'
+    url = f'https://www.transifex.com/api/2/project/{project}/{command}/'
     r = requests.get(url, params=params,
                      auth=(get_config()['username'], get_config()['password']))
     if r.status_code != 200:
