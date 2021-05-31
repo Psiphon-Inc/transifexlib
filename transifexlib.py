@@ -191,6 +191,7 @@ def transifex_request(project, command, params=None):
 
 def merge_yaml_translations(master_fpath, lang, trans_fpath, fresh_raw):
     """Merge YAML files (such as are used by Store Assets).
+    Can be passed as a mutator to `process_resource`.
     """
 
     yml = YAML_StringDumper()
@@ -209,17 +210,33 @@ def merge_yaml_translations(master_fpath, lang, trans_fpath, fresh_raw):
         return fresh_raw
 
     # Transifex does not populate YAML translations with the English fallback
-    # for missing values.
+    # for missing values, so absence is the indicator of a missing translation.
 
-    for key in english_translation['en']:
-        if not fresh_translation[lang].get(key) and existing_translation[lang].get(key):
-            fresh_translation[lang][key] = existing_translation[lang].get(key)
+    # Note that Transifex supports two style of YAML resources: Ruby and Generic https://docs.transifex.com/formats/yaml
+    # Ruby style has all strings in a file under that file's language key;
+    # Generic has all strings at the top level.
+
+    if english_translation.get('en'):
+        # Ruby style; we assuming that the master language is English
+        master = english_translation['en']
+        fresh = fresh_translation[lang]
+        existing = existing_translation[lang]
+    else:
+        master = english_translation
+        fresh = fresh_translation
+        existing = existing_translation
+
+    # Generic style
+    for key in master:
+        if not fresh.get(key) and existing.get(key):
+            fresh[key] = existing.get(key)
 
     return yml.dump(fresh_translation)
 
 
 def merge_applestrings_translations(master_fpath, lang, trans_fpath, fresh_raw):
     """Merge Xcode `.strings` files.
+    Can be passed as a mutator to `process_resource`.
     """
 
     # First flag all the untranslated entries, for later reference.
@@ -323,6 +340,6 @@ def _flag_untranslated_applestrings(master_fpath, lang, trans_fpath, fresh_raw):
 def yaml_lang_change(to_lang, _, in_yaml):
     """
     Transifex doesn't support the special character-type modifiers we need for some
-    languages, like 'ug' -> 'ug@Latn'. So we'll need to hack in the  character-type info.
+    languages, like 'ug' -> 'ug@Latn'. So we'll need to hack in the character-type info.
     """
     return to_lang + in_yaml[in_yaml.find(':'):]
