@@ -59,9 +59,8 @@ TRANSLATION_COMPLETION_PRINT_THRESHOLD = 50
 UNTRANSLATED_FLAG = '[UNTRANSLATED]'
 
 
-# Transifex credentials.
-# Must be of the form:
-# {"username": ..., "password": ...}
+# Transifex credentials. Must be of the form:
+#     {"api": <api token>}
 _config = None  # Don't use this directly. Call _getconfig()
 
 
@@ -70,33 +69,34 @@ def get_config():
     if _config:
         return _config
 
-    DEFAULT_CONFIG_FILENAME = 'transifex_conf.json'
+    API_TOKEN_FILENAME = 'transifex_api_token'
 
     # Figure out where the config file is
     parser = argparse.ArgumentParser(
         description='Pull translations from Transifex')
-    parser.add_argument('configfile', default=None, nargs='?',
-                        help='config file (default: pwd or location of script)')
+    parser.add_argument('api_token_file', default=None, nargs='?',
+                        help='Transifex API token file (default: ./{0})'.format(API_TOKEN_FILENAME))
     args = parser.parse_args()
-    configfile = None
-    if args.configfile and os.path.exists(args.configfile):
+    api_token_file = None
+    if args.api_token_file and os.path.exists(args.api_token_file):
         # Use the script argument
-        configfile = args.configfile
-    elif os.path.exists(DEFAULT_CONFIG_FILENAME):
-        # Use the conf in pwd
-        configfile = DEFAULT_CONFIG_FILENAME
+        api_token_file = args.api_token_file
+    elif os.path.exists(API_TOKEN_FILENAME):
+        # Use the API token in pwd
+        api_token_file = API_TOKEN_FILENAME
     elif __file__ and os.path.exists(os.path.join(
             os.path.dirname(os.path.realpath(__file__)),
-            DEFAULT_CONFIG_FILENAME)):
-        configfile = os.path.join(
+            API_TOKEN_FILENAME)):
+        # Use the API token in the script dir
+        api_token_file = os.path.join(
             os.path.dirname(os.path.realpath(__file__)),
-            DEFAULT_CONFIG_FILENAME)
+            API_TOKEN_FILENAME)
     else:
-        print('Unable to find config file')
+        print('Unable to find API token file')
         sys.exit(1)
 
-    with open(configfile) as config_fp:
-        _config = json.load(config_fp)
+    with open(api_token_file) as token_fp:
+        _config = {'api': token_fp.read().strip()}
 
     if not _config:
         print('Unable to load config contents')
@@ -167,7 +167,7 @@ def transifex_request(project, command, params=None):
 
     url = f'https://www.transifex.com/api/2/project/{project}/{command}/'
     r = requests.get(url, params=params,
-                     auth=(get_config()['username'], get_config()['password']))
+                    auth=('api', get_config()['api']))
     if r.status_code != 200:
         raise Exception(f'Request failed with code {r.status_code}: {url}')
     return r.json()
