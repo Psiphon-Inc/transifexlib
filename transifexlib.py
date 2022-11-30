@@ -21,13 +21,12 @@ Pulls and massages our translations from Transifex.
 import os
 import sys
 import errno
-import shutil
-import json
 import codecs
 import argparse
 import requests
 import localizable
 from bs4 import BeautifulSoup
+from transifex.api import transifex_api
 
 # To install this dependency on macOS:
 # pip install --upgrade setuptools --user python
@@ -51,8 +50,8 @@ class YAML_StringDumper(YAML):
             return stream.getvalue()
 
 
-# If an unused translation reaches this % completion, a notice will be printed about it.
-TRANSLATION_COMPLETION_PRINT_THRESHOLD = 50
+# If an unused translation reaches this completion fraction, a notice will be printed about it.
+TRANSLATION_COMPLETION_PRINT_THRESHOLD = 0.5
 
 
 # Used when keeping track of untranslated strings during merging.
@@ -105,7 +104,18 @@ def get_config():
     return _config
 
 
-def process_resource(resource, langs, master_fpath, output_path_fn, output_mutator_fn,
+def _decompose_resource_url(url: str) -> tuple[str, str, str]:
+    # A URL looks like this:
+    # https://www.transifex.com/<organization>/<project>/<resource>/
+    # Returns (organization, project, resource), suitable for passing to the Transifex API.
+    split = url.rstrip('/').split('/')
+    org = f'o:{split[-3]}'
+    proj = f'{org}:p:{split[-2]}'
+    res = f'{proj}:r:{split[-1]}'
+    return org, proj, res
+
+
+def process_resource(resource_url, langs, master_fpath, output_path_fn, output_mutator_fn,
                      bom=False, encoding='utf-8', project='Psiphon3'):
     """
     Pull translations for `resource` from transifex. Languages in `langs` will be
@@ -118,21 +128,24 @@ def process_resource(resource, langs, master_fpath, output_path_fn, output_mutat
     If `bom` is True, the file will have a BOM. File will be encoded with `encoding`.
     """
 
-    print(f'\nResource: {resource}')
+    org_name, proj_name, resource_name = _decompose_resource_url(resource_url)
+    print(f'\nResource: {resource_name}')
+    _, proj, resource = _get_tx_objects(org_name, proj_name, resource_name)
 
     # Check for high-translation languages that we won't be pulling
-    stats = transifex_request(project, f'resource/{resource}/stats')
+    stats = _tx_get_resource_stats(proj, resource)
     for lang in stats:
-        if int(stats[lang]['completed'].rstrip('%')) >= TRANSLATION_COMPLETION_PRINT_THRESHOLD:
+        if stats[lang]['completion'] >= TRANSLATION_COMPLETION_PRINT_THRESHOLD:
             if lang not in langs and lang != 'en':
-                print((
+                print(
                     f'Skipping language "{lang}" '
-                    f'with {stats[lang]["completed"]} translation '
-                    f'({stats[lang]["translated_entities"]} of '
-                    f'{stats[lang]["translated_entities"] + stats[lang]["untranslated_entities"]})'))
+                    f'with {stats[lang]["completion"]:.2f} translation '
+                    f'({stats[lang]["translated_strings"]} of '
+                    f'{stats[lang]["total_strings"]})')
 
     for in_lang, out_lang in list(langs.items()):
-        r = transifex_request(project, f'resource/{resource}/translation/{in_lang}')
+        print(f'Downloading {in_lang}...')
+        translation = _tx_download_translation_file(resource, in_lang)
 
         output_path = output_path_fn(out_lang)
 
@@ -147,9 +160,9 @@ def process_resource(resource, langs, master_fpath, output_path_fn, output_mutat
 
         if output_mutator_fn:
             content = output_mutator_fn(
-                master_fpath, out_lang, output_path, r['content'])
+                master_fpath, out_lang, output_path, translation)
         else:
-            content = r['content']
+            content = translation
 
         # Make line endings consistently Unix-y.
         content = content.replace('\r\n', '\n')
@@ -161,16 +174,57 @@ def process_resource(resource, langs, master_fpath, output_path_fn, output_mutat
             f.write(content)
 
 
-def transifex_request(project, command, params=None):
-    """Make a request to the Transifex API.
+_tx_cache = {
+    'org': {},
+    'proj': {},
+    'resource': {},
+}
+def _get_tx_objects(org_name: str, proj_name: str, resource_name: str) -> tuple[object, object, object]:
+    """Get the Transifex objects for the given names.
     """
+    global _tx_cache
 
-    url = f'https://www.transifex.com/api/2/project/{project}/{command}/'
-    r = requests.get(url, params=params,
-                    auth=('api', get_config()['api']))
+    transifex_api.setup(auth=get_config()['api'])
+
+    if org_name not in _tx_cache['org']:
+        _tx_cache['org'][org_name] = transifex_api.Organization.get(id=org_name)
+
+    if proj_name not in _tx_cache['proj']:
+        _tx_cache['proj'][proj_name] = transifex_api.Project.get(organization=_tx_cache['org'][org_name], id=proj_name)
+
+    if resource_name not in _tx_cache['resource']:
+        _tx_cache['resource'][resource_name] = transifex_api.Resource.get(project=_tx_cache['proj'][proj_name], id=resource_name)
+
+    return _tx_cache['org'][org_name], _tx_cache['proj'][proj_name], _tx_cache['resource'][resource_name]
+
+
+def _tx_get_resource_stats(proj, resource):
+    """Get the resource language stats (i.e., completion rates for the languages).
+    """
+    stats = transifex_api.ResourceLanguageStats.filter(project=proj, resource=resource)
+    res = {}
+    for stat in stats:
+        res[stat.language.id.lstrip('l:')] = {
+            'completion': stat.translated_strings / stat.total_strings,
+            'translated_strings': stat.translated_strings,
+            'untranslated_strings': stat.untranslated_strings,
+            'total_strings': stat.total_strings,
+            'reviewed_strings': stat.reviewed_strings,
+            'proofread_strings': stat.proofread_strings,
+        }
+    return res
+
+
+def _tx_download_translation_file(resource, lang) -> str:
+    """Download a translation file from Transifex.
+    Returns the translation file as a string.
+    """
+    lang = transifex_api.Language(id=f'l:{lang}')
+    download_url = transifex_api.ResourceTranslationsAsyncDownload.download(resource=resource, language=lang)
+    r = requests.get(download_url)
     if r.status_code != 200:
-        raise Exception(f'Request failed with code {r.status_code}: {url}')
-    return r.json()
+        raise Exception(f'Request failed with code {r.status_code}: {resource} {lang} {download_url}')
+    return r.text
 
 
 #

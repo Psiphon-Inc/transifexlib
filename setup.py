@@ -25,6 +25,7 @@ setup(
     license='GPLv3',
     py_modules=['transifexlib'],
     install_requires=[
+        'transifex-python',
         'requests',
         'beautifulsoup4',
         'ruamel.yaml',
