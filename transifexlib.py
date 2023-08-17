@@ -382,7 +382,7 @@ def _flag_untranslated_applestrings(master_fpath, lang, trans_fpath, fresh_raw):
         entry['value'] = entry['value'].replace(
             '"', '\\"').replace('\n', '\\n')
 
-        fresh_flagged += f'/*{entry["comment"]}*/\n"{entry["key"]}" = "{y["value"]}";\n\n'
+        fresh_flagged += f'/*{entry["comment"]}*/\n"{entry["key"]}" = "{entry["value"]}";\n\n'
 
     return fresh_flagged
 
