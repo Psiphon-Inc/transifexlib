@@ -118,12 +118,12 @@ def _decompose_resource_url(url: str) -> tuple[str, str, str]:
 def process_resource(resource_url, langs, master_fpath, output_path_fn, output_mutator_fn,
                      bom=False, encoding='utf-8', project='Psiphon3'):
     """
-    Pull translations for `resource` from transifex. Languages in `langs` will be
-    pulled.
+    Pull translations for `resource_url` from transifex.
+    `langs` is a dict of {<transifex language code>: <output language code>}.
     `master_fpath` is the file path to the master (English) language version of the resource.
     `output_path_fn` must be callable. It will be passed the language code and
     must return the path+filename to write to.
-    `output_mutator_fn` must be callable. It will be passed `master_fpath, lang, fname, translation`
+    `output_mutator_fn` must be callable. It will be passed `master_fpath, in_lang, out_lang, fname, translation`
     and must return the resulting translation. May be None.
     If `bom` is True, the file will have a BOM. File will be encoded with `encoding`.
     """
@@ -160,7 +160,7 @@ def process_resource(resource_url, langs, master_fpath, output_path_fn, output_m
 
         if output_mutator_fn:
             content = output_mutator_fn(
-                master_fpath, out_lang, output_path, translation)
+                master_fpath, in_lang, out_lang, output_path, translation)
         else:
             content = translation
 
@@ -235,15 +235,14 @@ def _tx_download_translation_file(resource, lang) -> str:
 #
 # All of merge_*_translations functions have the same signature:
 #   `master_fpath`: The filename and path of the master language file (i.e., English).
-#   `trans_lang`: The translation language code (as used in the filename).
+#   `in_lang`: The Transifex language code.
+#   `out_lang`: The output translation language code (as used in the filename).
 #   `trans_fpath`: The translation filename and path.
 #   `fresh_raw`: The raw content of the new translation.
 # Note that all paths can be relative to cwd.
 #
-# All of the flag_untranslated_* functions have the same signature:
-#
 
-def merge_yaml_translations(master_fpath, lang, trans_fpath, fresh_raw):
+def merge_yaml_translations(master_fpath, in_lang, out_lang, trans_fpath, fresh_raw):
     """Merge YAML files (such as are used by Store Assets).
     Can be passed as a mutator to `process_resource`.
     """
@@ -270,32 +269,39 @@ def merge_yaml_translations(master_fpath, lang, trans_fpath, fresh_raw):
     # Ruby style has all strings in a file under that file's language key;
     # Generic has all strings at the top level.
 
+    ruby_style = False
     if english_translation.get('en'):
-        # Ruby style; we assuming that the master language is English
+        # Ruby style; we are assuming that the master language is English
+        ruby_style = True
         master = english_translation['en']
-        fresh = fresh_translation[lang]
-        existing = existing_translation[lang]
+        fresh = fresh_translation[in_lang]
+        existing = existing_translation[out_lang]
     else:
+        # Generic style
         master = english_translation
         fresh = fresh_translation
         existing = existing_translation
 
-    # Generic style
+    # Use existing translations for strings missing from the fresh translation
     for key in master:
         if not fresh.get(key) and existing.get(key):
             fresh[key] = existing.get(key)
 
-    return yml.dump(fresh_translation)
+    if ruby_style:
+        # We need to add the top-level language key back in
+        fresh = {out_lang: fresh}
+
+    return yml.dump(fresh)
 
 
-def merge_applestrings_translations(master_fpath, lang, trans_fpath, fresh_raw):
+def merge_applestrings_translations(master_fpath, in_lang, out_lang, trans_fpath, fresh_raw):
     """Merge Xcode `.strings` files.
     Can be passed as a mutator to `process_resource`.
     """
 
     # First flag all the untranslated entries, for later reference.
     fresh_raw = _flag_untranslated_applestrings(
-        master_fpath, lang, trans_fpath, fresh_raw)
+        master_fpath, out_lang, trans_fpath, fresh_raw)
 
     fresh_translation = localizable.parse_strings(content=fresh_raw)
     english_translation = localizable.parse_strings(filename=master_fpath)
@@ -385,6 +391,24 @@ def _flag_untranslated_applestrings(master_fpath, lang, trans_fpath, fresh_raw):
         fresh_flagged += f'/*{entry["comment"]}*/\n"{entry["key"]}" = "{entry["value"]}";\n\n'
 
     return fresh_flagged
+
+
+def merge_html_translations(master_fpath, in_lang, out_lang, trans_fpath, fresh_raw):
+    """Merge HTML files, where Transifex wraps the strings in an extraneous `<div>`.
+    Can be passed as a mutator to `process_resource`.
+    """
+    # For some reason Transifex wraps everything in a <div>, so we need to
+    # drill into the elements to get our stuff.
+    soup = BeautifulSoup(fresh_raw, features="html.parser")
+    divs = soup.findAll('div', 'response-subject')
+    divs += soup.findAll('div', 'response-body')
+    result = u'\n\n'.join([str(div) for div in divs])
+
+    # For some reason (again), Transifex replaces some "%"" with "&#37;",
+    # which wrecks our formatting efforts.
+    result = result.replace(u'&#37;', u'%')
+
+    return result
 
 
 #
