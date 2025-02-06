@@ -1,0 +1,26 @@
+[project]
+name = "transifexlib"
+version = "4.1.0"
+description = "Transifex helper library for Psiphon projects"
+authors = [
+    {name = "Psiphon Inc."}
+]
+license = {text = "GPLv3"}
+dependencies = [
+    "transifex-python",
+    "requests",
+    "beautifulsoup4",
+    "ruamel.yaml",
+    "localizable @ git+https://github.com/chrisballinger/python-localizable.git@15d3bf2466d0de1a826d3f0ff1f365b0c1910f56"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project.urls]
+Homepage = "https://github.com/Psiphon-Inc/transifexlib"
+Repository = "https://github.com/Psiphon-Inc/transifexlib"
+
+[tool.hatch.metadata]
+allow-direct-references = true

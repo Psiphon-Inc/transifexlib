@@ -23,6 +23,7 @@ import sys
 import errno
 import codecs
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import requests
 import localizable
 from bs4 import BeautifulSoup
@@ -143,9 +144,19 @@ def process_resource(resource_url, langs, master_fpath, output_path_fn, output_m
                     f'({stats[lang]["translated_strings"]} of '
                     f'{stats[lang]["total_strings"]})')
 
-    for in_lang, out_lang in list(langs.items()):
-        print(f'Downloading {in_lang}...')
-        translation = _tx_download_translation_file(resource, in_lang)
+    # Downloading translations from Transifex is very slow. It works like this under the
+    # hood: Make a request to prepare a download of a single language for a resource, then
+    # poll until the download is ready (with sleeps), then download the file.
+    # We're going to parallelize this process to speed it up.
+    # Note that the Transifex API has a rate limits: https://developers.transifex.com/reference/rate-limit
+    # As we get more language, we might need to back off on the number of workers, or
+    # otherwise slow down our requests, or cope with rate-limit-exceeded responses.
+    print(f'Downloading translations for {len(langs)} languages...')
+    resource_download = lambda lang: _tx_download_translation_file(resource, lang)
+    with ThreadPoolExecutor(max_workers=100) as executor:
+        pending_results = executor.map(resource_download, langs.keys())
+
+    for (in_lang, out_lang), translation in zip(langs.items(), pending_results):
 
         output_path = output_path_fn(out_lang)
 
@@ -220,7 +231,12 @@ def _tx_download_translation_file(resource, lang) -> str:
     Returns the translation file as a string.
     """
     lang = transifex_api.Language(id=f'l:{lang}')
-    download_url = transifex_api.ResourceTranslationsAsyncDownload.download(resource=resource, language=lang)
+    # `interval` is the number of seconds between poll requests checking if the download
+    # is ready. At the default of 5 seconds, our Android string pulls take about 35
+    # seconds; at 2 seconds they take about 25 seconds. This is value is one way we could
+    # back off on the number of requests we make to Transifex if we start hitting rate
+    # limits, but for now we're going to be aggressive.
+    download_url = transifex_api.ResourceTranslationsAsyncDownload.download(resource=resource, language=lang, interval=2)
     r = requests.get(download_url)
     if r.status_code != 200:
         raise Exception(f'Request failed with code {r.status_code}: {resource} {lang} {download_url}')
